@@ -202,12 +202,19 @@ async def ws_handler(request):
         await ws.send_str(json.dumps({"t": "error", "msg": "Wrong password"}))
         await ws.close(code=4001)
         return ws
-    if app["session"]["busy"]:
-        await ws.send_str(json.dumps({"t": "error", "msg": "Someone else is already connected"}))
-        await ws.close(code=4002)
-        return ws
-
-    app["session"]["busy"] = True
+    # Only one viewer at a time: a new login takes over, so a stale session
+    # (closed laptop lid, dropped network) can never lock you out.
+    session = app["session"]
+    old = session["ws"]
+    if old is not None and not old.closed:
+        print("[*] New viewer is taking over the existing session")
+        try:
+            await old.send_str(json.dumps({"t": "error", "msg": "Another viewer took over this session"}))
+        except Exception:
+            pass
+        # Don't wait for the old peer's close handshake; it may be unreachable.
+        asyncio.create_task(old.close(code=4002))
+    session["ws"] = ws
     print(f"[+] {peer} connected")
     await ws.send_str(json.dumps({"t": "ok"}))
     acked = asyncio.Event()
@@ -228,7 +235,8 @@ async def ws_handler(request):
     finally:
         streamer.cancel()
         injector.release_all()
-        app["session"]["busy"] = False
+        if session["ws"] is ws:
+            session["ws"] = None
         print(f"[-] {peer} disconnected")
     return ws
 
@@ -301,7 +309,7 @@ def main():
     app = web.Application()
     app.update(
         password=load_password(args.password), fps=args.fps, quality=args.quality,
-        max_width=args.max_width, view_only=args.view_only, session={"busy": False},
+        max_width=args.max_width, view_only=args.view_only, session={"ws": None},
         injector=InputInjector(monitor),
         capture_pool=ThreadPoolExecutor(max_workers=1, thread_name_prefix="capture"),
     )

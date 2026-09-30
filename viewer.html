@@ -6,6 +6,7 @@
 <title>LiteView</title>
 <style>
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px system-ui, sans-serif; overflow: hidden; }
   #bar { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #222; border-bottom: 1px solid #333; }
   #status { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -56,14 +57,18 @@ function send(obj) {
 }
 
 function connect() {
+  if (ws) ws.close();
+  authed = false;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.binaryType = 'blob';
+  const sock = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = sock;
+  sock.binaryType = 'blob';
   statusEl.textContent = 'Connecting…';
 
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'auth', pw: password }));
+  sock.onopen = () => sock.send(JSON.stringify({ t: 'auth', pw: password }));
 
-  ws.onmessage = async (e) => {
+  sock.onmessage = async (e) => {
+    if (sock !== ws) return;  // a newer connection replaced this one
     if (typeof e.data === 'string') {
       const msg = JSON.parse(e.data);
       if (msg.t === 'ok') {
@@ -85,10 +90,11 @@ function connect() {
     ctx.drawImage(bmp, 0, 0);
     bmp.close();
     frames++;
-    ws.send('{"t":"ack"}');
+    sock.send('{"t":"ack"}');
   };
 
-  ws.onclose = () => {
+  sock.onclose = () => {
+    if (sock !== ws) return;
     authed = false;
     if (wantConnected) {
       statusEl.textContent = 'Connection lost — reconnecting…';
@@ -116,6 +122,7 @@ document.getElementById('loginForm').addEventListener('submit', (e) => {
 document.getElementById('discBtn').onclick = () => {
   wantConnected = false;
   if (ws) ws.close();
+  ws = null;
   showLogin();
 };
 

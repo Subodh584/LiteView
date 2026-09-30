@@ -38,7 +38,21 @@ host's Wi-Fi can reach the port. If Tailscale isn't connected yet (for example, 
 host waits for it to connect before starting. Bookmark the address. You can also use the host's
 MagicDNS name, such as `http://my-laptop:8765`.
 
-Only one controller can be connected at a time. If the connection drops, the viewer reconnects automatically.
+### If the Tailscale address doesn't connect
+
+1. **Both** computers must be logged in to the same Tailscale account. On Linux, run
+   `sudo tailscale up`, and `tailscale status` should list both computers.
+2. From the controller, run `tailscale ping <host-tailscale-ip>`. If that fails, the problem is
+   Tailscale itself, not LiteView.
+3. **Windows firewall** (most common): Windows treats the Tailscale adapter as a *Public*
+   network, so the rule it created for Python on your home Wi-Fi doesn't cover it. In an
+   **admin** PowerShell on the host, run:
+   ```powershell
+   netsh advfirewall firewall add rule name="LiteView (Tailscale)" dir=in action=allow protocol=TCP localport=8765 remoteip=100.64.0.0/10
+   ```
+   This opens the port only to Tailscale addresses.
+
+Only one controller can be connected at a time. A new login takes over from the previous session. If the connection drops, the viewer reconnects automatically.
 
 ## Supported hosts
 
