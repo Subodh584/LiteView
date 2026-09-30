@@ -5,7 +5,31 @@ A tiny two-computer remote desktop tool.
 - **Host** (the computer being controlled) runs `host.py`.
 - **Controller** opens `http://<host-ip>:8765` in any browser. It needs nothing installed.
 
-## Run the host
+## Install on the host (one command)
+
+On the computer you want to control, run:
+
+**Windows** (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/Subodh584/LiteView/main/install.ps1 | iex
+```
+
+**Linux (X11) / macOS** (terminal):
+```bash
+curl -fsSL https://raw.githubusercontent.com/Subodh584/LiteView/main/install.sh | bash
+```
+
+This one command:
+
+- downloads LiteView (on Windows it also installs Python if needed)
+- opens the firewall port (Windows asks for permission once)
+- makes LiteView start automatically at login, then starts it right away
+- prints the address and password to use from the other computer
+
+If Tailscale is installed, the command sets LiteView to accept connections only through Tailscale.
+Run the same command again to update LiteView. The output log is saved in `~/.liteview.log`.
+
+## Run the host manually
 
 ```bash
 python -m venv .venv
@@ -66,6 +90,8 @@ Only one controller can be connected at a time. A new login takes over from the 
 The controller can run any OS with a modern browser.
 
 ## Start automatically ("always connectable")
+
+The one-command installer already sets this up. To set it up by hand:
 
 - **Windows:** press Win+R, run `shell:startup`, and put a shortcut there to
   `C:\path\to\.venv\Scripts\pythonw.exe C:\path\to\host.py --tailscale-only`.

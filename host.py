@@ -13,6 +13,7 @@ import json
 import os
 import secrets
 import socket
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,7 @@ from pynput.mouse import Controller as MouseController
 
 HERE = Path(__file__).resolve().parent
 PASSWORD_FILE = Path.home() / ".liteview_password"
+LOG_FILE = Path.home() / ".liteview.log"
 MSS = getattr(mss, "MSS", None) or mss.mss  # mss >= 10 renamed the class
 
 # ---------------------------------------------------------------- screen capture
@@ -292,6 +294,9 @@ def wait_for_tailscale():
 
 
 def main():
+    if sys.stdout is None:  # started with pythonw (no console): write to a log file instead
+        sys.stdout = sys.stderr = open(LOG_FILE, "a", buffering=1, encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="LiteView host: share this screen and allow remote control.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--password", help=f"access password (default: $LITEVIEW_PASSWORD, else saved in {PASSWORD_FILE})")
@@ -301,7 +306,18 @@ def main():
     parser.add_argument("--view-only", action="store_true", help="share the screen but ignore mouse/keyboard")
     parser.add_argument("--tailscale-only", action="store_true",
                         help="only accept connections through Tailscale (waits for Tailscale if it isn't up yet)")
+    parser.add_argument("--show-address", action="store_true",
+                        help="print the addresses and password to connect with, then exit")
     args = parser.parse_args()
+
+    if args.show_address:
+        ts_ip = tailscale_ip()
+        print(f"  From anywhere (Tailscale):   http://{ts_ip}:{args.port}" if ts_ip
+              else "  Tailscale not connected - only reachable on this local network.")
+        if not args.tailscale_only:
+            print(f"  From the same network:       http://{lan_ip()}:{args.port}")
+        print(f"  Password:                    {load_password(args.password)}")
+        return
 
     with MSS() as sct:
         monitor = dict(sct.monitors[1])
