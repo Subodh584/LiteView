@@ -8,11 +8,13 @@ import asyncio
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import secrets
 import socket
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -256,6 +258,31 @@ def lan_ip():
             return "127.0.0.1"
 
 
+TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def tailscale_ip():
+    """This computer's Tailscale IPv4 address, or None if Tailscale isn't connected."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("100.100.100.100", 1))  # Tailscale's own resolver; routes via the tailnet
+            ip = s.getsockname()[0]
+        except OSError:
+            return None
+    return ip if ipaddress.ip_address(ip) in TAILSCALE_NET else None
+
+
+def wait_for_tailscale():
+    # When started at boot, Tailscale may not be connected yet.
+    ip = tailscale_ip()
+    if ip is None:
+        print("Waiting for Tailscale to connect...", flush=True)
+    while ip is None:
+        time.sleep(5)
+        ip = tailscale_ip()
+    return ip
+
+
 def main():
     parser = argparse.ArgumentParser(description="LiteView host: share this screen and allow remote control.")
     parser.add_argument("--port", type=int, default=8765)
@@ -264,6 +291,8 @@ def main():
     parser.add_argument("--quality", type=int, default=60, help="JPEG quality 1-95 (lower = less bandwidth)")
     parser.add_argument("--max-width", type=int, default=1600, help="downscale frames wider than this")
     parser.add_argument("--view-only", action="store_true", help="share the screen but ignore mouse/keyboard")
+    parser.add_argument("--tailscale-only", action="store_true",
+                        help="only accept connections through Tailscale (waits for Tailscale if it isn't up yet)")
     args = parser.parse_args()
 
     with MSS() as sct:
@@ -279,12 +308,24 @@ def main():
     app.router.add_get("/", index)
     app.router.add_get("/ws", ws_handler)
 
+    if args.tailscale_only:
+        ts_ip = wait_for_tailscale()
+        bind_host = ts_ip
+    else:
+        ts_ip = tailscale_ip()
+        bind_host = "0.0.0.0"
+
     print("LiteView host is running.")
-    print(f"  Open on the other computer:  http://{lan_ip()}:{args.port}")
+    if ts_ip:
+        print(f"  From anywhere (Tailscale):   http://{ts_ip}:{args.port}")
+    else:
+        print("  Tailscale not connected - only reachable on this local network.")
+    if not args.tailscale_only:
+        print(f"  From the same network:       http://{lan_ip()}:{args.port}")
     print(f"  Password:                    {app['password']}")
     print(f"  Screen:                      {monitor['width']}x{monitor['height']}"
           + ("  (view only)" if args.view_only else ""))
-    web.run_app(app, host="0.0.0.0", port=args.port, print=None)
+    web.run_app(app, host=bind_host, port=args.port, print=None)
 
 
 if __name__ == "__main__":
