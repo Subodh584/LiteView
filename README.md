@@ -22,11 +22,13 @@ curl -fsSL https://raw.githubusercontent.com/Subodh584/LiteView/main/install.sh 
 This one command:
 
 - downloads LiteView (on Windows it also installs Python if needed)
+- installs Tailscale if needed (except on macOS) and, if this computer isn't signed in yet, shows a
+  sign-in link. Sign in with the **same account** you use on the controlling computer.
 - opens the firewall port (Windows asks for permission once)
 - makes LiteView start automatically at login, then starts it right away
 - prints the address and password to use from the other computer
 
-If Tailscale is installed, the command sets LiteView to accept connections only through Tailscale.
+Once Tailscale is connected, the command sets LiteView to accept connections only through Tailscale.
 Run the same command again to update LiteView. The output log is saved in `~/.liteview.log`.
 
 ## Run the host manually

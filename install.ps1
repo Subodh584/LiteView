@@ -2,8 +2,9 @@
 #
 #   irm https://raw.githubusercontent.com/Subodh584/LiteView/main/install.ps1 | iex
 #
-# Downloads LiteView, installs Python if needed, opens the firewall port (one UAC
-# prompt), makes LiteView start at login, and starts it now. Re-run it to update.
+# Downloads LiteView, installs Python and Tailscale if needed, signs this computer
+# in to Tailscale, opens the firewall port, makes LiteView start at login, and
+# starts it now. Re-run it to update.
 
 & {
 $ErrorActionPreference = 'Stop'
@@ -30,6 +31,21 @@ function Find-Python {
     }
     $fallback = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
     if (Test-Path $fallback) { return $fallback }
+    return $null
+}
+
+function Find-Tailscale {
+    @((Get-Command tailscale -ErrorAction SilentlyContinue).Source,
+      (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe')) |
+        Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+}
+
+# Returns Tailscale's state (Running, NeedsLogin, Stopped, ...) or $null if its service isn't reachable.
+function Get-TailscaleState($exe) {
+    try {
+        $json = (& $exe status --json 2>$null) -join "`n"
+        if ($json) { return ($json | ConvertFrom-Json).BackendState }
+    } catch {}
     return $null
 }
 
@@ -77,18 +93,42 @@ try {
     & $venvPy -m pip install --disable-pip-version-check -q -r (Join-Path $Dir 'requirements.txt')
     if ($LASTEXITCODE) { throw 'Installing Python packages failed (see the messages above).' }
 
-    # ---- Tailscale --------------------------------------------------------------
-    $tailscale = @((Get-Command tailscale -ErrorAction SilentlyContinue).Source,
-                   (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe')) |
-        Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    # ---- Tailscale: install and sign in -------------------------------------------
+    $tailscale = Find-Tailscale
+    if (-not $tailscale) {
+        Say 'Installing Tailscale (click Yes on the Windows prompt)...'
+        try {
+            winget install -e --id Tailscale.Tailscale --silent `
+                --accept-package-agreements --accept-source-agreements | Out-Host
+        } catch {}
+        $tailscale = Find-Tailscale
+        if (-not $tailscale) {
+            Warn 'Could not install Tailscale automatically. Install it from https://tailscale.com/download'
+            Warn 'and re-run this command to enable access over the internet.'
+        }
+    }
+    $tsConnected = $false
+    if ($tailscale) {
+        # A freshly installed Tailscale service can take a few seconds to start.
+        for ($i = 0; $i -lt 15 -and -not (Get-TailscaleState $tailscale); $i++) { Start-Sleep -Seconds 2 }
+        if ((Get-TailscaleState $tailscale) -ne 'Running') {
+            Say 'Connecting this computer to Tailscale...'
+            Warn 'If a link appears below, open it and sign in with the SAME Tailscale account'
+            Warn 'you use on the other computer. The install continues once you have signed in.'
+            # --unattended keeps Tailscale connected at boot, even before anyone logs in.
+            & $tailscale up --unattended
+            if ($LASTEXITCODE -and (Get-TailscaleState $tailscale) -ne 'Running') { & $tailscale up }
+        }
+        $tsConnected = (Get-TailscaleState $tailscale) -eq 'Running'
+        if (-not $tsConnected) {
+            Warn 'Tailscale is not connected, so LiteView will only work on this local network.'
+            Warn 'Re-run this command after signing in to Tailscale to enable access over the internet.'
+        }
+    }
+
     $hostPy = Join-Path $Dir 'host.py'
     $hostArgs = @("`"$hostPy`"")
-    if ($tailscale) {
-        $hostArgs += '--tailscale-only'
-    } else {
-        Warn 'Tailscale is not installed, so LiteView will only work on this local network.'
-        Warn 'For access over the internet, install it from https://tailscale.com/download and re-run this command.'
-    }
+    if ($tsConnected) { $hostArgs += '--tailscale-only' }
     $argLine = $hostArgs -join ' '
 
     # ---- firewall (one UAC prompt, only the first time) --------------------------
@@ -131,7 +171,7 @@ try {
     Write-Host ''
     Write-Host 'LiteView is running. On the other computer, open:' -ForegroundColor Green
     $showArgs = @($hostPy, '--show-address')
-    if ($tailscale) { $showArgs += '--tailscale-only' }
+    if ($tsConnected) { $showArgs += '--tailscale-only' }
     & $venvPy @showArgs
     Write-Host ''
     Write-Host "It starts automatically at every login. Log file: $Log"
